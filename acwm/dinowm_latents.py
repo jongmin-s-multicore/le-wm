@@ -7,7 +7,7 @@ The visual latent of a frame is 256 patches x 384; the probe uses its mean over 
 rollout latents are also decoded and measured, to check that they give the cloth pixels of #6.
 
 usage (envs/dino_wm python, cwd = thread0 checkout on branch hanbin5/acwm-phys):
-  python <le-wm>/acwm/dinowm_latents.py <ckpt_base> <model_name> <h5 dir> <out.npz> [--device cpu]
+  python <le-wm>/acwm/dinowm_latents.py <ckpt_base> <model_name> <h5 dir> <out.npz> [--device cpu] [--epoch 15]
 """
 import argparse, json, os, sys, time
 from pathlib import Path
@@ -28,6 +28,8 @@ def main():
     ap.add_argument("ckpt_base"); ap.add_argument("model_name"); ap.add_argument("h5dir"); ap.add_argument("out")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=8)
+    ap.add_argument("--max-eps", type=int, default=0, help="episodes per split, for a quick check")
+    ap.add_argument("--epoch", type=int, default=15, help="checkpoint model_<epoch>.pth (#6 evaluated epoch 15); 0 = model_latest.pth")
     a = ap.parse_args()
     torch.set_grad_enabled(False)
     torch.set_num_threads(a.threads)
@@ -39,7 +41,9 @@ def main():
     H, f = cfg.num_hist, cfg.frameskip
     assert f == FS
     dev = torch.device(a.device)
-    model = load_model(mp / "checkpoints" / "model_latest.pth", cfg, cfg.num_action_repeat, dev).eval()
+    ck = mp / "checkpoints" / (f"model_{a.epoch}.pth" if a.epoch else "model_latest.pth")
+    model = load_model(ck, cfg, cfg.num_action_repeat, dev)
+    model.eval()  # VWorldModel.eval() returns None
     ds = cfg.env.dataset
     from datasets.acwm_phys_dset import load_acwm_phys_split
     tf = hydra.utils.instantiate(ds.transform)
@@ -53,7 +57,7 @@ def main():
         assert side["names"] == base.video_names
         with h5py.File(Path(a.h5dir) / f"clothmove_{split}.h5", "r") as hf:
             off = hf["ep_offset"][:]
-            for e in range(len(base)):
+            for e in range(len(base) if not a.max_eps else min(a.max_eps, len(base))):
                 vis = base.get_frames(e, range(T))[0]["visual"]  # (65, 3, 224, 224) in [-1, 1], the DINO-WM transform
                 zeros = lambda n: torch.zeros(1, n, 1, device=dev)
                 zr = model.encode_obs({"visual": vis[None].to(dev), "proprio": zeros(T)})["visual"][0]  # (65, 256, 384)
@@ -85,7 +89,7 @@ def main():
                 out["px_dec_25"].append(px25)
                 if e % 20 == 0:
                     print(f"{split} {e}/{len(base)} {time.time() - t0:.0f} s", flush=True)
-    np.savez_compressed(a.out, **{k: np.array(v) for k, v in out.items()}, num_hist=H, model=a.model_name)
+    np.savez_compressed(a.out, **{k: np.array(v) for k, v in out.items()}, num_hist=H, model=a.model_name, ckpt=ck.name)
     print(f"done {time.time() - t0:.0f} s -> {a.out}", flush=True)
 
 
