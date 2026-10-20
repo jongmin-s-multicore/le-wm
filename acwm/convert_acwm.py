@@ -30,7 +30,6 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import cv2
-import decord
 import h5py
 import numpy as np
 import torch
@@ -59,6 +58,7 @@ def water_px(rgb):
 
 
 def frames(path, n, resize, w0):
+    import decord  # only for decoding; load_split (action statistics) works without it
     torch.set_num_threads(1)
     vr = decord.VideoReader(str(path), num_threads=1)
     assert len(vr) >= n, f"{path}: {len(vr)} frames, need {n}"
