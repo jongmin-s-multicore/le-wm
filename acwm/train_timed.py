@@ -32,7 +32,7 @@ class StepLog(pl.Callback):
         if step - self.n >= self.every:
             torch.cuda.synchronize()
             now = time.time()
-            m = {k: _num(v) for k, v in trainer.callback_metrics.items() if k.startswith("train/")}
+            m = {k: _num(v) for k, v in trainer.callback_metrics.items() if "loss" in k and not k.startswith(("val", "validate"))}
             print("STEPLOG " + json.dumps({"step": step, "epoch": trainer.current_epoch, "step_per_s": (step - self.n) / (now - self.t),
                                            "lr": trainer.optimizers[0].param_groups[0]["lr"], **m,
                                            "peak_alloc_GiB": torch.cuda.max_memory_allocated() / 2**30,
@@ -41,7 +41,7 @@ class StepLog(pl.Callback):
             self.t, self.n = now, step
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        m = {k: _num(v) for k, v in trainer.callback_metrics.items() if not k.startswith("train/")}
+        m = {k: _num(v) for k, v in trainer.callback_metrics.items()}
         print("VALLOG " + json.dumps({"step": trainer.global_step, "epoch": trainer.current_epoch, **m}), flush=True)
         self.t = None  # validation time is not training speed
 
@@ -57,7 +57,9 @@ class Trainer(_Trainer):
 pl.Trainer = Trainer
 
 if __name__ == "__main__":
-    import train  # noqa: E402
+    import runpy
 
-    sys.argv[0] = train.__file__
-    train.run()
+    # run train.py as __main__: Hydra finds config/train next to the file only for a script, not for an imported module
+    path = str(Path(__file__).resolve().parents[1] / "train.py")
+    sys.argv[0] = path
+    runpy.run_path(path, run_name="__main__")

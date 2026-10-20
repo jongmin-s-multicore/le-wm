@@ -20,31 +20,20 @@ usage (cwd = le-wm checkout):
 import argparse, json, sys, time
 from pathlib import Path
 
-import cv2
 import h5py
 import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from cloth_measure import FS, GRID, T, cloth_px  # noqa: E402
 
-FS, HIST, T = 5, 3, 65
-GRID = list(range(0, T - 1, FS))  # 0..60, 13 frames
+HIST = 3
 DINO_WM_6 = {  # issue jongmin-s-multicore/thread0#6, table 2, last frame (60), cloth pixels at 224 px
     "ind": {"real": 1819, "enc_dec": 1790, "step25": 1801, "rollout": 1888},
     "smaller": {"real": 404, "enc_dec": 388, "step25": 840, "rollout": 1129},
     "larger": {"real": 4475, "enc_dec": 4352, "step25": 2773, "rollout": 1836},
 }
-
-
-def hue(hsv, lo, hi, s, v=80):
-    h = hsv[..., 0]
-    m = (h >= lo) & (h <= hi) if lo <= hi else ((h >= lo) | (h <= hi))
-    return m & (hsv[..., 1] > s) & (hsv[..., 2] > v)
-
-
-def cloth_px(rgb):
-    hsv = cv2.cvtColor(rgb, cv2.COLOR_RGB2HSV)
-    return int((hue(hsv, 8, 16, 120) | hue(hsv, 158, 170, 60)).sum())
 
 
 def load_model(run, weights, dev):
