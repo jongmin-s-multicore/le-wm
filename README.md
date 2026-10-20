@@ -1,184 +1,78 @@
+# LeWM: Datasets and Training
 
-# LeWorldModel
-### Stable End-to-End Joint-Embedding Predictive Architecture from Pixels
+![LeWorldModel training pipeline](assets/lewm_pipeline.png)
 
-[Lucas Maes*](https://x.com/lucasmaes_), [Quentin Le Lidec*](https://quentinll.github.io/), [Damien Scieur](https://scholar.google.com/citations?user=hNscQzgAAAAJ&hl=fr), [Yann LeCun](https://yann.lecun.com/) and [Randall Balestriero](https://randallbalestriero.github.io/)
+LeWorldModel training pipeline ([paper](https://arxiv.org/abs/2603.19312), Figure 1).
 
-**Abstract:** Joint Embedding Predictive Architectures (JEPAs) offer a compelling framework for learning world models in compact latent spaces, yet existing methods remain fragile, relying on complex multi-term losses, exponential moving averages, pretrained encoders, or auxiliary supervision to avoid representation collapse. In this work, we introduce LeWorldModel (LeWM), the first JEPA that trains stably end-to-end from raw pixels using only two loss terms: a next-embedding prediction loss and a regularizer enforcing Gaussian-distributed latent embeddings. This reduces tunable loss hyperparameters from six to one compared to the only existing end-to-end alternative. With ~15M parameters trainable on a single GPU in a few hours, LeWM plans up to 48× faster than foundation-model-based world models while remaining competitive across diverse 2D and 3D control tasks. Beyond control, we show that LeWM's latent space encodes meaningful physical structure through probing of physical quantities. Surprise evaluation confirms that the model reliably detects physically implausible events.
+LeWM learns a world model from offline trajectories of RGB frames and actions, with no rewards or task labels. The encoder and the predictor are trained together from scratch with two loss terms. One model is trained per environment, for 10 epochs with batch size 128.
 
-<p align="center">
-   <b>[ <a href="https://arxiv.org/pdf/2603.19312v1">Paper</a> | <a href="https://huggingface.co/collections/quentinll/lewm">Checkpoints &amp; Data</a> | <a href="https://le-wm.github.io/">Website</a> ]</b>
-</p>
-
-<br>
-
-<p align="center">
-  <img src="assets/lewm.gif" width="80%">
-</p>
-
-If you find this code useful, please reference it in your paper:
-```
-@article{maes_lelidec2026lewm,
-  title={LeWorldModel: Stable End-to-End Joint-Embedding Predictive Architecture from Pixels},
-  author={Maes, Lucas and Le Lidec, Quentin and Scieur, Damien and LeCun, Yann and Balestriero, Randall},
-  journal={arXiv preprint},
-  year={2026}
-}
+```math
+\begin{aligned} \mathcal{L} &= \underbrace{\lVert \hat{z}_{t+1} - z_{t+1} \rVert_2^2}_{\text{prediction}} + \lambda \, \underbrace{\mathrm{SIGReg}(Z)}_{\text{anti-collapse}}, \qquad \lambda = 0.09 \\ \hat{z}_{t+1} &= \mathrm{pred}(z_t, a_t), \qquad z_t = \mathrm{enc}(o_t) \end{aligned}
 ```
 
-## Using the code
-This codebase builds on [stable-worldmodel](https://github.com/galilai-group/stable-worldmodel) for environment management, planning, and evaluation, and [stable-pretraining](https://github.com/galilai-group/stable-pretraining) for training. Together they reduce this repository to its core contribution: the model architecture and training objective.
+The prediction term trains the predictor and makes the embeddings predictable. SIGReg keeps the embeddings spread out like $\mathcal{N}(0, I)$, so the encoder cannot map every frame to the same vector. $\lambda$ is the only loss weight to tune. On PushT the success rate stays above 80% for $\lambda$ between 0.01 and 0.2. There is no stop-gradient, EMA or pretrained encoder.
 
-**Installation:**
-```bash
-uv venv --python=3.10
-source .venv/bin/activate
-uv pip install stable-worldmodel[train,env]
-```
+## Dataset requirements
 
-## Data
+LeWM can be trained on any offline dataset that meets these conditions.
 
-Datasets use the HDF5 format for fast loading. Download the data from [HuggingFace](https://huggingface.co/collections/quentinll/lewm) and decompress with:
+- Each step has one RGB frame (`pixels`) and one continuous action (`action`) of fixed size. The action at step $t$ is the one taken after frame $t$. Only these two go into the model.
+- Episodes are at least 20 steps long and recorded at a constant control rate.
+- No rewards or task labels. Expert, scripted and random policies all work if the data covers the dynamics.
+- Very simple, low-diversity data is a weak case for SIGReg. The paper gives this as the likely reason LeWM does worst on TwoRoom.
+- The file is a stable-worldmodel HDF5 file: one array per column, plus `ep_len` and `ep_offset`.
+- Planning evaluation also needs the simulator state of every step, to reset the start and the goal.
 
-```bash
-tar --zstd -xvf archive.tar.zst
-```
+![One training sample per dataset](assets/lewm_samples.png)
 
-Place the extracted `.h5` files under `$STABLEWM_HOME` (defaults to `~/.stable-wm/`). You can override this path:
-```bash
-export STABLEWM_HOME=/path/to/your/storage
-```
+Each row is one training sample from the released .h5 files. Frames are 5 steps apart, and the graph under each frame shows the raw actions of the next 5 steps. The actions in block 3 are not used in the loss. The bar on the left shows where the 20-step window sits in its episode.
 
-Dataset names are specified without the `.h5` extension. For example, `config/train/data/pusht.yaml` references `pusht_expert_train`, which resolves to `$STABLEWM_HOME/pusht_expert_train.h5`.
+## Training step
 
-## Training
+Each training sample is a 20-step window: 4 frames 5 steps apart, each followed by a block of 5 actions. The predictor sees up to 3 frames of history and predicts the next embedding at each position.
 
-`jepa.py` contains the PyTorch implementation of LeWM. Training is configured via [Hydra](https://hydra.cc/) config files under `config/train/`.
+![LeWM training step](assets/lewm_training_step.png)
 
-Before training, set your WandB `entity` and `project` in `config/train/lewm.yaml`:
-```yaml
-wandb:
-  config:
-    entity: your_entity
-    project: your_project
-```
+- The targets $z_1$–$z_3$ come from the same encoder and also receive gradients. Action block $A_3$ is loaded but not used.
+- SIGReg projects the 128 embeddings of each time step onto 1024 random directions and compares each projection with $\mathcal{N}(0, 1)$ using the Epps–Pulley statistic.
+- Frames are resized to 224×224 and normalized with ImageNet statistics. Actions are z-scored per dimension.
 
-To launch training:
-```bash
-python train.py data=pusht
-```
+## Training setup
 
-Checkpoints are saved to `$STABLEWM_HOME` upon completion.
+All four environments use the same settings. Only the action dimension changes.
 
-For baseline scripts, see the stable-worldmodel [scripts](https://github.com/galilai-group/stable-worldmodel/tree/main/scripts/train) folder.
+| Item | Value |
+| --- | --- |
+| Model | ViT-tiny encoder (5.50M), 6-layer transformer predictor (10.79M), 18.03M in total |
+| Optimizer | AdamW, lr 5e-5, weight decay 1e-3 |
+| LR schedule | Linear warmup over the first 1% of steps, then cosine decay. Updated every step |
+| Batch, precision | 128, bf16, gradient clipping 1.0 |
+| Epochs | 10 in the paper, 100 in the config |
+| Steps per epoch | TwoRoom 5,138, Reacher 12,796, PushT 13,933 |
+| SIGReg | $\lambda$ 0.09 (0.1 in the paper text), 1024 projections |
 
-## Planning
+- Epochs: the authors set a 100-epoch schedule and stopped at 10 ([#52](https://github.com/lucas-maes/le-wm/issues/52)). The learning rate is still about 98% of its peak at that point. Setting `max_epochs` to 10 gives a different schedule.
+- Precision: users report NaN losses and spikes with bf16, fixed by switching to fp32 ([#36](https://github.com/lucas-maes/le-wm/issues/36)).
+- History: the paper uses 1 frame of history for TwoRoom, while the released TwoRoom checkpoint config uses 3 ([#100](https://github.com/lucas-maes/le-wm/issues/100), no answer yet).
 
-Evaluation configs live under `config/eval/`. Set the `policy` field to the checkpoint path **relative to `$STABLEWM_HOME`**, without the `_object.ckpt` suffix:
+## Released datasets
 
-```bash
-# ✓ correct
-python eval.py --config-name=pusht.yaml policy=pusht/lewm
+The authors release one dataset per environment in the Hugging Face collection [`quentinll/lewm`](https://huggingface.co/collections/quentinll/lewm-69c58f5e20580628114d20c4) (MIT).
 
-# ✗ incorrect
-python eval.py --config-name=pusht.yaml policy=pusht/lewm_object.ckpt
-```
+| Environment | Task | Collection policy | Episodes | Length (frames) | Action | Extra keys loaded | Size (zst / h5) |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TwoRoom | 2D navigation. The agent passes a door to reach a goal in the other room | Noisy heuristic: door first, then goal | 10,000 | 31–101, mean 92 | 2-D, [-1, 1] | proprio (agent position, 2-D) | 3.4 GB / 12.8 GB |
+| Reacher (DMC) | Match a 2-joint arm to a target pose | SAC in the paper. The released actions are uniform random in [-1, 1] | 10,000 | 201 | 2-D, [-1, 1] | observation (6-D) | 23.8 GB / 98.9 GB |
+| PushT | 2D manipulation. Push a T block to a target pose | Expert demonstrations, DINO-WM PushT train split | 18,685 | 49–246, mean 125 | 2-D, -1.5 to 2.0 | proprio (4-D), state (7-D) | 13.1 GB / 46.3 GB |
+| OGBench-Cube | 3D manipulation. A robot arm picks up a cube and places it at a target | OGBench data-collection heuristic | 10,000 | 200 | 5-D | observation, proprio | 46.2 GB / – |
 
-## Pretrained Checkpoints
+PushT is the DINO-WM PushT train split. The paper reports 20,000 episodes with mean length 196, while the file has 18,685 with mean length 125. Reacher actions in the file are uniform random, while the paper describes SAC data ([#98](https://github.com/lucas-maes/le-wm/issues/98)). The Cube episode count and length are the paper's values (Appendix E).
 
-Pretrained LeWM checkpoints for each environment are mirrored on the Hugging Face
-Hub (model repos), alongside the datasets (dataset repos) in the same collection:
+## References
 
-- [`quentinll/lewm-pusht`](https://huggingface.co/quentinll/lewm-pusht)
-- [`quentinll/lewm-cube`](https://huggingface.co/quentinll/lewm-cube)
-- [`quentinll/lewm-tworooms`](https://huggingface.co/quentinll/lewm-tworooms)
-- [`quentinll/lewm-reacher`](https://huggingface.co/quentinll/lewm-reacher)
-
-The full baseline checkpoint suite (PLDM, LeJEPA, IVL, IQL, GCBC, DINO-WM, DINO-WM-noprop)
-is available on [Google Drive](https://drive.google.com/drive/folders/1r31os0d4-rR0mdHc7OlY_e5nh3XT4r4e):
-
-<div align="center">
-
-| Method | two-room | pusht | cube | reacher |
-|:---:|:---:|:---:|:---:|:---:|
-| pldm | ✓ | ✓ | ✓ | ✓ |
-| lejepa | ✓ | ✓ | ✓ | ✓ |
-| ivl | ✓ | ✓ | ✓ | — |
-| iql | ✓ | ✓ | ✓ | — |
-| gcbc | ✓ | ✓ | ✓ | — |
-| dinowm | ✓ | ✓ | — | — |
-| dinowm_noprop | ✓ | ✓ | ✓ | ✓ |
-
-</div>
-
-## Loading a checkpoint
-
-### From the Drive archive
-
-Each tar archive contains two files per checkpoint:
-- `<name>_object.ckpt` — a serialized Python object for convenient loading; this is what `eval.py` and the `stable_worldmodel` API use
-- `<name>_weight.ckpt` — a weights-only checkpoint (`state_dict`) for cases where you want to load weights into your own model instance
-
-Place the extracted files under `$STABLEWM_HOME/` and load via:
-
-```python
-import stable_worldmodel as swm
-
-# Load the cost model (for MPC)
-cost = swm.policy.AutoCostModel('pusht/lewm')
-```
-
-`AutoCostModel` accepts:
-- `run_name` — checkpoint path **relative to `$STABLEWM_HOME`**, without the `_object.ckpt` suffix
-- `cache_dir` — optional override for the checkpoint root (defaults to `$STABLEWM_HOME`)
-
-The returned module is in `eval` mode with its PyTorch weights accessible via `.state_dict()`.
-
-### From the Hugging Face mirror
-
-The HF model repos ship the LeWM checkpoint as a `weights.pt` (state dict) plus a
-`config.json` describing the model. Convert once to produce the `_object.ckpt`
-that `eval.py` expects:
-
-```bash
-# download weights.pt + config.json
-hf download quentinll/lewm-pusht --local-dir $STABLEWM_HOME/hf_pusht
-
-# convert to object checkpoint under $STABLEWM_HOME/pusht/lewm_object.ckpt
-python - <<'PY'
-import json, torch, stable_pretraining as spt
-from pathlib import Path
-from jepa import JEPA
-from module import ARPredictor, Embedder, MLP
-import stable_worldmodel as swm
-
-src = Path(swm.data.utils.get_cache_dir(), "hf_pusht")
-out = Path(swm.data.utils.get_cache_dir(), "pusht", "lewm_object.ckpt")
-
-cfg = json.loads((src / "config.json").read_text())
-encoder = spt.backbone.utils.vit_hf(
-    cfg["encoder"]["size"],
-    patch_size=cfg["encoder"]["patch_size"],
-    image_size=cfg["encoder"]["image_size"],
-    pretrained=False, use_mask_token=False,
-)
-mlp = lambda k: MLP(input_dim=cfg[k]["input_dim"], output_dim=cfg[k]["output_dim"],
-                    hidden_dim=cfg[k]["hidden_dim"], norm_fn=torch.nn.BatchNorm1d)
-model = JEPA(
-    encoder=encoder,
-    predictor=ARPredictor(**cfg["predictor"]),
-    action_encoder=Embedder(**cfg["action_encoder"]),
-    projector=mlp("projector"),
-    pred_proj=mlp("pred_proj"),
-)
-sd = torch.load(src / "weights.pt", map_location="cpu", weights_only=False)
-model.load_state_dict(sd, strict=True)
-out.parent.mkdir(parents=True, exist_ok=True)
-torch.save(model, out)
-PY
-```
-
-After conversion, load via `swm.policy.AutoCostModel('pusht/lewm')` as usual.
-
-## Contact & Contributions
-Feel free to open [issues](https://github.com/lucas-maes/le-wm/issues)! For questions or collaborations, please contact `lucas.maes@mila.quebec`
+- Paper: [LeWorldModel, arXiv 2603.19312 v3](https://arxiv.org/abs/2603.19312) (revised 2026-06-03). Section 3.1, Appendix A, D, E, G.
+- Code: [lucas-maes/le-wm](https://github.com/lucas-maes/le-wm) commit 8edfeb3. `train.py`, `jepa.py`, `module.py`, `config/train/`. Installation, training and evaluation commands are in the [upstream README](https://github.com/lucas-maes/le-wm#readme).
+- Dataloader: [galilai-group/stable-worldmodel](https://github.com/galilai-group/stable-worldmodel) commit 21446f1. `data/dataset.py`, `data/formats/hdf5.py`.
+- Training loop: [galilai-group/stable-pretraining](https://github.com/galilai-group/stable-pretraining) commit ab836bf. `module.py`, `optim/lr_scheduler.py`.
+- Data and checkpoints: [Hugging Face collection quentinll/lewm](https://huggingface.co/collections/quentinll/lewm-69c58f5e20580628114d20c4).
+- Upstream issues: [#36](https://github.com/lucas-maes/le-wm/issues/36) bf16 loss spikes, [#52](https://github.com/lucas-maes/le-wm/issues/52) `max_epochs`, [#98](https://github.com/lucas-maes/le-wm/issues/98) Reacher data policy, [#100](https://github.com/lucas-maes/le-wm/issues/100) TwoRoom history.
