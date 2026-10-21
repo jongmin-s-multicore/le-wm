@@ -19,7 +19,7 @@ usage (cwd = le-wm checkout):
                            [--weights FILE] [--src ACWM-Phys dir] [--device cpu|cuda]
   -> <out prefix>.json, <out prefix>.npz
 """
-import argparse, json, sys, time
+import argparse, json, os, sys, time
 from pathlib import Path
 
 import h5py
@@ -84,6 +84,8 @@ def train_action_stats(env, h5dir, src):
             a = torch.from_numpy(np.array(f["action"][:]))
         how = "ind_train h5"
     else:
+        if src is None:
+            sys.exit(f"no {side.name} or {h5.name} in {h5dir}: pass --src <ACWM-Phys dir> or set ACWM_DATA_ROOT")
         from convert_acwm import load_split
         _, _, acts, _ = load_split(Path(src), env, "ind_train")
         a = torch.from_numpy(np.concatenate(acts))
@@ -232,7 +234,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("env", choices=list(PREFIX)); ap.add_argument("run"); ap.add_argument("h5dir"); ap.add_argument("out")
     ap.add_argument("--weights", default=None, help="default: the weights_epoch_*.pt with the highest epoch")
-    ap.add_argument("--src", default="/data/dinowm/downloads/ACWM-Phys")
+    ap.add_argument("--src", default=os.environ.get("ACWM_DATA_ROOT"),
+                    help="ACWM-Phys dir, used only when <h5 dir> has no ind_train file (default $ACWM_DATA_ROOT)")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--threads", type=int, default=0)
     a = ap.parse_args()
