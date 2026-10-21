@@ -1,184 +1,68 @@
+# LeWM on ACWM-Phys
 
-# LeWorldModel
-### Stable End-to-End Joint-Embedding Predictive Architecture from Pixels
+LeWM 을 [ACWM-Phys](https://huggingface.co/datasets/t1an/ACWM-Phys) environment 4개 (Cloth Move, Push Sand, Stack Cube, Pour Water) 의 InD 학습 데이터로 학습하고, OoD test 에서 물체 양을 어떻게 예측하는지 DINO-WM 과 비교했다. DINO-WM 결과는 [jongmin-s-multicore/thread0#6](https://github.com/jongmin-s-multicore/thread0/issues/6) 의 것이다. DINO-WM 은 DINOv2 encoder 를 고정하고 predictor 만 학습한다. LeWM 은 encoder (ViT-tiny) 와 predictor 를 pixel 에서 scratch 부터 함께 학습한다.
 
-[Lucas Maes*](https://x.com/lucasmaes_), [Quentin Le Lidec*](https://quentinll.github.io/), [Damien Scieur](https://scholar.google.com/citations?user=hNscQzgAAAAJ&hl=fr), [Yann LeCun](https://yann.lecun.com/) and [Randall Balestriero](https://randallbalestriero.github.io/)
+## Results
 
-**Abstract:** Joint Embedding Predictive Architectures (JEPAs) offer a compelling framework for learning world models in compact latent spaces, yet existing methods remain fragile, relying on complex multi-term losses, exponential moving averages, pretrained encoders, or auxiliary supervision to avoid representation collapse. In this work, we introduce LeWorldModel (LeWM), the first JEPA that trains stably end-to-end from raw pixels using only two loss terms: a next-embedding prediction loss and a regularizer enforcing Gaussian-distributed latent embeddings. This reduces tunable loss hyperparameters from six to one compared to the only existing end-to-end alternative. With ~15M parameters trainable on a single GPU in a few hours, LeWM plans up to 48× faster than foundation-model-based world models while remaining competitive across diverse 2D and 3D control tasks. Beyond control, we show that LeWM's latent space encodes meaningful physical structure through probing of physical quantities. Surprise evaluation confirms that the model reliably detects physically implausible events.
+Rollout 의 물체 양 (pixel 수) 이다. Rollout 은 첫 real frame 과 모든 action 으로 예측한다. Cloth Move, Push Sand 는 마지막 frame (60), Pour Water 는 frame 250–295 의 평균이다. 괄호는 real 대비 비율이다.
 
-<p align="center">
-   <b>[ <a href="https://arxiv.org/pdf/2603.19312v1">Paper</a> | <a href="https://huggingface.co/collections/quentinll/lewm">Checkpoints &amp; Data</a> | <a href="https://le-wm.github.io/">Website</a> ]</b>
-</p>
+| Environment | Test | n | Real | LeWM probe, real frames | LeWM probe, rollout | DINO-WM Enc→Dec | DINO-WM rollout |
+|---|---|---:|---:|---:|---:|---:|---:|
+| Cloth Move (cloth pixels) | InD | 100 | 1,819 | 2,134 (117%) | 2,140 (118%) | 1,790 (98%) | 1,888 (104%) |
+| | OoD, area 0.26x | 50 | 404 | 552 (137%) | 744 (184%) | 388 (96%) | 1,129 (279%) |
+| | OoD, area 2.5x | 50 | 4,475 | 4,248 (95%) | 2,832 (63%) | 4,352 (97%) | 1,836 (41%) |
+| Push Sand (sand pixels) | InD | 100 | 1,792 | 1,776 (99%) | 1,772 (99%) | 1,729 (96%) | 1,665 (93%) |
+| | OoD, 2x sand | 100 | 3,886 | 3,845 (99%) | 2,526 (65%) | 3,215 (83%) | 1,843 (47%) |
+| Pour Water (water pixels in the box) | InD | 50 | 1,970 | 1,994 (101%) | 2,081 (106%) | 1,962 (100%) | 2,045 (104%) |
+| | OoD, less water | 26 | 1,384 | 1,386 (100%) | 1,922 (139%) | 1,370 (99%) | 2,049 (148%) |
+| | OoD, more water | 24 | 2,407 | 2,354 (98%) | 1,984 (82%) | 2,326 (97%) | 2,077 (86%) |
 
-<br>
+- LeWM 은 decoder 가 없어서 embedding 에서 물체 양을 읽는 ridge probe 로 쟀다. "real frames" 는 real frame 의 embedding 에 probe 를 쓴 값이고, "rollout" 은 예측한 embedding 에 쓴 값이다.
+- DINO-WM 은 decoder 출력에서 #6 과 같은 color mask 로 쟀다. "Enc→Dec" 는 real frame 을 encoder 와 decoder 로 복원한 값이다. 같은 probe 를 DINO-WM latent 에 쓰면 decoder 값과 같게 나온다 (Cloth Move OoD 2.5x rollout, probe 1,867, decoder 1,836).
+- LeWM rollout 도 OoD 물체 양을 학습 때 값 쪽으로 옮긴다. Cloth Move 와 Push Sand 에서는 DINO-WM 보다 덜 옮기고 (63% 대 41%, 65% 대 47%), Pour Water 에서는 비슷하다 (82% 대 86%, 139% 대 148%).
+- Cloth Move real frame probe 의 R² 는 LeWM 0.880, DINO-WM 0.992 다. LeWM 은 학습할수록 R² 가 줄었다 (epoch 10 0.988, 50 0.918, 100 0.880).
+- Stack Cube 는 #6 과 비교하지 못했다. 학습 중간 (epoch 44 와 88 사이) 부터 encoder embedding 이 episode 안에서 거의 변하지 않았다 (차원당 분산 0.003). 최종 model 의 예측 오차는 copy-last 와 같고, "쌓였는가" 는 probe 로 읽히지 않았다. Validation loss 는 끝까지 줄었다.
 
-<p align="center">
-  <img src="assets/lewm.gif" width="80%">
-</p>
+![Cloth Move: frame 별 cloth pixel 수](assets/lewm_acwm_cloth_curves.png)
 
-If you find this code useful, please reference it in your paper:
-```
-@article{maes_lelidec2026lewm,
-  title={LeWorldModel: Stable End-to-End Joint-Embedding Predictive Architecture from Pixels},
-  author={Maes, Lucas and Le Lidec, Quentin and Scieur, Damien and LeCun, Yann and Balestriero, Randall},
-  journal={arXiv preprint},
-  year={2026}
-}
-```
+Cloth Move test group 별 평균이다. 검정은 real frame, 파랑은 LeWM probe (점선 real frame embedding, 실선 rollout), 주황은 DINO-WM decoder (점선 Enc→Dec, 실선 rollout) 다.
 
-## Using the code
-This codebase builds on [stable-worldmodel](https://github.com/galilai-group/stable-worldmodel) for environment management, planning, and evaluation, and [stable-pretraining](https://github.com/galilai-group/stable-pretraining) for training. Together they reduce this repository to its core contribution: the model architecture and training objective.
+## Setup
 
-**Installation:**
-```bash
-uv venv --python=3.10
-source .venv/bin/activate
-uv pip install stable-worldmodel[train,env]
-```
+| Item | Value |
+|---|---|
+| Data | ACWM-Phys (HF `t1an/ACWM-Phys`, commit `4017e5f`), #6 과 같은 split. mp4 를 stable-worldmodel HDF5 (224×224) 로 변환했다 (`acwm/convert_acwm.py`) |
+| Action | Cloth Move 6차원 (항상 1.0 인 3, 7번 차원 제거), Push Sand 다음 frame 의 pusher pose (x, z, cos yaw, sin yaw), Stack Cube 7차원, Pour Water 2차원 (항상 0 인 0, 2번 차원 제거) |
+| Model | le-wm 기본값 (`8edfeb3`). ViT-tiny/14 encoder (pretraining 없음), 6-layer predictor, 18.0M parameters, history 3, frameskip 5, batch size 128, AdamW lr 5e-5, SIGReg weight 0.09 |
+| Training | Environment 마다 약 64k optimizer step (#6 의 DINO-WM 과 같은 수). Cloth Move 100 epochs, Push Sand 115, Stack Cube 175, Pour Water 33. Seed 1개 |
+| Hardware | Colab RTX PRO 6000 Blackwell (G4), 학습 2개를 한 GPU 에서 함께 실행. 학습 하나 8.2–8.4 step/s, 최대 GPU memory 12.5 GiB |
+| Probe | Ridge regression, embedding → 물체 양. Group 마다 test episode 를 짝수, 홀수로 나눠 한쪽의 real frame embedding 으로 맞추고 다른 쪽에 적용한 뒤 서로 바꾼다 |
 
-## Data
+ACWM-Phys 는 simulator 를 공개하지 않아서 planning 은 평가하지 않았다.
 
-Datasets use the HDF5 format for fast loading. Download the data from [HuggingFace](https://huggingface.co/collections/quentinll/lewm) and decompress with:
+## Reproduce
 
-```bash
-tar --zstd -xvf archive.tar.zst
-```
-
-Place the extracted `.h5` files under `$STABLEWM_HOME` (defaults to `~/.stable-wm/`). You can override this path:
-```bash
-export STABLEWM_HOME=/path/to/your/storage
-```
-
-Dataset names are specified without the `.h5` extension. For example, `config/train/data/pusht.yaml` references `pusht_expert_train`, which resolves to `$STABLEWM_HOME/pusht_expert_train.h5`.
-
-## Training
-
-`jepa.py` contains the PyTorch implementation of LeWM. Training is configured via [Hydra](https://hydra.cc/) config files under `config/train/`.
-
-Before training, set your WandB `entity` and `project` in `config/train/lewm.yaml`:
-```yaml
-wandb:
-  config:
-    entity: your_entity
-    project: your_project
-```
-
-To launch training:
-```bash
-python train.py data=pusht
-```
-
-Checkpoints are saved to `$STABLEWM_HOME` upon completion.
-
-For baseline scripts, see the stable-worldmodel [scripts](https://github.com/galilai-group/stable-worldmodel/tree/main/scripts/train) folder.
-
-## Planning
-
-Evaluation configs live under `config/eval/`. Set the `policy` field to the checkpoint path **relative to `$STABLEWM_HOME`**, without the `_object.ckpt` suffix:
+LeWM 사용법은 [upstream README](https://github.com/lucas-maes/le-wm#readme) 에 있다. 아래 명령은 이 checkout 에서 실행한다.
 
 ```bash
-# ✓ correct
-python eval.py --config-name=pusht.yaml policy=pusht/lewm
-
-# ✗ incorrect
-python eval.py --config-name=pusht.yaml policy=pusht/lewm_object.ckpt
+uv venv --python=3.10 && source .venv/bin/activate
+uv pip install "stable-worldmodel[train,env]" "transformers<5" "datasets>=3" hdf5plugin
+export STABLEWM_HOME=/path/to/storage ACWM_DATA_ROOT=/path/to/ACWM-Phys
+hf download t1an/ACWM-Phys --repo-type dataset --revision 4017e5f5900a7a8590d4e944b6a84f55df75a0c1 --local-dir $ACWM_DATA_ROOT
 ```
-
-## Pretrained Checkpoints
-
-Pretrained LeWM checkpoints for each environment are mirrored on the Hugging Face
-Hub (model repos), alongside the datasets (dataset repos) in the same collection:
-
-- [`quentinll/lewm-pusht`](https://huggingface.co/quentinll/lewm-pusht)
-- [`quentinll/lewm-cube`](https://huggingface.co/quentinll/lewm-cube)
-- [`quentinll/lewm-tworooms`](https://huggingface.co/quentinll/lewm-tworooms)
-- [`quentinll/lewm-reacher`](https://huggingface.co/quentinll/lewm-reacher)
-
-The full baseline checkpoint suite (PLDM, LeJEPA, IVL, IQL, GCBC, DINO-WM, DINO-WM-noprop)
-is available on [Google Drive](https://drive.google.com/drive/folders/1r31os0d4-rR0mdHc7OlY_e5nh3XT4r4e):
-
-<div align="center">
-
-| Method | two-room | pusht | cube | reacher |
-|:---:|:---:|:---:|:---:|:---:|
-| pldm | ✓ | ✓ | ✓ | ✓ |
-| lejepa | ✓ | ✓ | ✓ | ✓ |
-| ivl | ✓ | ✓ | ✓ | — |
-| iql | ✓ | ✓ | ✓ | — |
-| gcbc | ✓ | ✓ | ✓ | — |
-| dinowm | ✓ | ✓ | — | — |
-| dinowm_noprop | ✓ | ✓ | ✓ | ✓ |
-
-</div>
-
-## Loading a checkpoint
-
-### From the Drive archive
-
-Each tar archive contains two files per checkpoint:
-- `<name>_object.ckpt` — a serialized Python object for convenient loading; this is what `eval.py` and the `stable_worldmodel` API use
-- `<name>_weight.ckpt` — a weights-only checkpoint (`state_dict`) for cases where you want to load weights into your own model instance
-
-Place the extracted files under `$STABLEWM_HOME/` and load via:
-
-```python
-import stable_worldmodel as swm
-
-# Load the cost model (for MPC)
-cost = swm.policy.AutoCostModel('pusht/lewm')
-```
-
-`AutoCostModel` accepts:
-- `run_name` — checkpoint path **relative to `$STABLEWM_HOME`**, without the `_object.ckpt` suffix
-- `cache_dir` — optional override for the checkpoint root (defaults to `$STABLEWM_HOME`)
-
-The returned module is in `eval` mode with its PyTorch weights accessible via `.state_dict()`.
-
-### From the Hugging Face mirror
-
-The HF model repos ship the LeWM checkpoint as a `weights.pt` (state dict) plus a
-`config.json` describing the model. Convert once to produce the `_object.ckpt`
-that `eval.py` expects:
 
 ```bash
-# download weights.pt + config.json
-hf download quentinll/lewm-pusht --local-dir $STABLEWM_HOME/hf_pusht
-
-# convert to object checkpoint under $STABLEWM_HOME/pusht/lewm_object.ckpt
-python - <<'PY'
-import json, torch, stable_pretraining as spt
-from pathlib import Path
-from jepa import JEPA
-from module import ARPredictor, Embedder, MLP
-import stable_worldmodel as swm
-
-src = Path(swm.data.utils.get_cache_dir(), "hf_pusht")
-out = Path(swm.data.utils.get_cache_dir(), "pusht", "lewm_object.ckpt")
-
-cfg = json.loads((src / "config.json").read_text())
-encoder = spt.backbone.utils.vit_hf(
-    cfg["encoder"]["size"],
-    patch_size=cfg["encoder"]["patch_size"],
-    image_size=cfg["encoder"]["image_size"],
-    pretrained=False, use_mask_token=False,
-)
-mlp = lambda k: MLP(input_dim=cfg[k]["input_dim"], output_dim=cfg[k]["output_dim"],
-                    hidden_dim=cfg[k]["hidden_dim"], norm_fn=torch.nn.BatchNorm1d)
-model = JEPA(
-    encoder=encoder,
-    predictor=ARPredictor(**cfg["predictor"]),
-    action_encoder=Embedder(**cfg["action_encoder"]),
-    projector=mlp("projector"),
-    pred_proj=mlp("pred_proj"),
-)
-sd = torch.load(src / "weights.pt", map_location="cpu", weights_only=False)
-model.load_state_dict(sd, strict=True)
-out.parent.mkdir(parents=True, exist_ok=True)
-torch.save(model, out)
-PY
+# decord, torchvision, h5py 가 있는 Python. env: cloth_move, push_sand, stack_cube, pour_water
+python -I acwm/convert_acwm.py $ACWM_DATA_ROOT $STABLEWM_HOME/acwm --env cloth_move
 ```
 
-After conversion, load via `swm.policy.AutoCostModel('pusht/lewm')` as usual.
+```bash
+python acwm/train_timed.py data=acwm_cloth_move output_model_name=lewm_cloth_move subdir=lewm_cloth_move \
+  num_workers=8 trainer.max_epochs=100 loader.persistent_workers=False loader.prefetch_factor=2
+```
 
-## Contact & Contributions
-Feel free to open [issues](https://github.com/lucas-maes/le-wm/issues)! For questions or collaborations, please contact `lucas.maes@mila.quebec`
+```bash
+python acwm/eval_acwm.py cloth_move $STABLEWM_HOME/checkpoints/lewm_cloth_move $STABLEWM_HOME/acwm results/eval_cloth_move
+```
+
+`acwm/train_timed.py` 는 `train.py` 에 step 속도와 GPU memory log 를 더한 script 다. Epoch 수는 Setup 표의 값을 쓴다. DINO-WM latent 에 같은 probe 를 쓰는 비교는 `acwm/dinowm_latents.py` 와 `acwm/probe_dinowm.py` 로 한다. DINO-WM model 은 HF [`hanbin5/dino-wm-acwm-phys`](https://huggingface.co/hanbin5/dino-wm-acwm-phys) 의 `outputs/train_cloth_h1f5` 다.
