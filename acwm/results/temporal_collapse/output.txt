@@ -1,0 +1,27 @@
+=== variance_split.py
+cloth_move  total var/dim 0.980  within-episode 0.5749  between-episode 0.405  within/total 0.587  |z_last - z_first| 18.96  mean |z| 13.9
+push_sand   total var/dim 0.881  within-episode 0.3760  between-episode 0.505  within/total 0.427  |z_last - z_first| 16.53  mean |z| 14.0
+pour_water  total var/dim 1.001  within-episode 0.6879  between-episode 0.313  within/total 0.687  |z_last - z_first| 15.73  mean |z| 13.9
+stack_cube  total var/dim 1.008  within-episode 0.0033  between-episode 1.004  within/total 0.003  |z_last - z_first| 1.82  mean |z| 14.0
+=== stack_static.py
+episodes 338; yellow moved in 95 %; median move: moved cube 123.6 px, other 7.3 px (256 px frame)
+  episode-mean embedding -> stationary cube x            R2 = 0.06
+  episode-mean embedding -> stationary cube y            R2 = 0.17
+  episode-mean embedding -> moved cube start x           R2 = 0.01
+  episode-mean embedding -> moved cube start y           R2 = -0.01
+  episode-mean embedding -> moved cube end x             R2 = 0.01
+  episode-mean embedding -> moved cube end y             R2 = 0.08
+  episode-mean embedding -> which cube moved (yellow=1)  R2 = -0.01
+  first-frame embedding -> moved cube start x R2 = 0.00;  last-frame embedding -> moved cube end x R2 = 0.01
+  |z_last - z_first| mean 1.82 vs distance between two episodes mean 19.55
+  stationary-cube distance to embedding nearest neighbour: median 0.1 px vs random episode 21.2 px
+  Spearman(embedding distance, stationary-cube distance) over pairs = -0.049
+  first-frame corner/table colour spread across episodes (std per channel): [ 4.85  3.05  1.82  0.    0.    0.   17.34 14.3  10.46]
+  episode-mean embedding -> room corner mean R   R2 = 0.88
+=== stack_dup.py
+pairs with near-identical first frame (MAD<1 grey level): 88 | episodes whose embedding-NN is such a twin: 83 of 338
+first-frame MAD to embedding-NN: median 3.09 | random pair median 20.01
+room-background MAD to embedding-NN: median 0.23 | random pair median 30.53
+Spearman(embedding distance, whole first-frame distance) = 0.043 | room background only = 0.049
+twin pair splits: {np.str_('ind_test/ind_test'): np.int64(17), np.str_('ood_test/ood_test'): np.int64(71)}
+embedding distance within twin pairs: median 0.21 | all pairs median 19.77

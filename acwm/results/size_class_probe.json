@@ -1,0 +1,116 @@
+{
+ "lewm": {
+  "accuracy_real_all_frames": 0.8358461538461539,
+  "ind": {
+   "n": 100,
+   "real": {
+    "ind": 0.77,
+    "smaller": 0.13,
+    "larger": 0.1
+   },
+   "25step": {
+    "ind": 0.78,
+    "smaller": 0.13,
+    "larger": 0.09
+   },
+   "rollout": {
+    "ind": 0.78,
+    "smaller": 0.14,
+    "larger": 0.08
+   }
+  },
+  "smaller": {
+   "n": 50,
+   "real": {
+    "ind": 0.16,
+    "smaller": 0.84,
+    "larger": 0.0
+   },
+   "25step": {
+    "ind": 0.32,
+    "smaller": 0.68,
+    "larger": 0.0
+   },
+   "rollout": {
+    "ind": 0.32,
+    "smaller": 0.68,
+    "larger": 0.0
+   }
+  },
+  "larger": {
+   "n": 50,
+   "real": {
+    "ind": 0.34,
+    "smaller": 0.0,
+    "larger": 0.66
+   },
+   "25step": {
+    "ind": 0.38,
+    "smaller": 0.02,
+    "larger": 0.6
+   },
+   "rollout": {
+    "ind": 0.54,
+    "smaller": 0.02,
+    "larger": 0.44
+   }
+  }
+ },
+ "dinowm": {
+  "accuracy_real_all_frames": 0.9827692307692308,
+  "ind": {
+   "n": 100,
+   "real": {
+    "ind": 0.94,
+    "smaller": 0.06,
+    "larger": 0.0
+   },
+   "25step": {
+    "ind": 0.96,
+    "smaller": 0.04,
+    "larger": 0.0
+   },
+   "rollout": {
+    "ind": 0.99,
+    "smaller": 0.01,
+    "larger": 0.0
+   }
+  },
+  "smaller": {
+   "n": 50,
+   "real": {
+    "ind": 0.04,
+    "smaller": 0.96,
+    "larger": 0.0
+   },
+   "25step": {
+    "ind": 0.78,
+    "smaller": 0.22,
+    "larger": 0.0
+   },
+   "rollout": {
+    "ind": 0.96,
+    "smaller": 0.04,
+    "larger": 0.0
+   }
+  },
+  "larger": {
+   "n": 50,
+   "real": {
+    "ind": 0.08,
+    "smaller": 0.0,
+    "larger": 0.92
+   },
+   "25step": {
+    "ind": 1.0,
+    "smaller": 0.0,
+    "larger": 0.0
+   },
+   "rollout": {
+    "ind": 1.0,
+    "smaller": 0.0,
+    "larger": 0.0
+   }
+  }
+ }
+}

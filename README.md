@@ -21,11 +21,27 @@ Rollout 의 물체 양 (pixel 수) 이다. Rollout 은 첫 real frame 과 모든
 - DINO-WM 은 decoder 출력에서 #6 과 같은 color mask 로 쟀다. "Enc→Dec" 는 real frame 을 encoder 와 decoder 로 복원한 값이다. 같은 probe 를 DINO-WM latent 에 쓰면 decoder 값과 같게 나온다 (Cloth Move OoD 2.5x rollout, probe 1,867, decoder 1,836).
 - LeWM rollout 도 OoD 물체 양을 학습 때 값 쪽으로 옮긴다. Cloth Move 와 Push Sand 에서는 DINO-WM 보다 덜 옮기고 (63% 대 41%, 65% 대 47%), Pour Water 에서는 비슷하다 (82% 대 86%, 139% 대 148%).
 - Cloth Move real frame probe 의 R² 는 LeWM 0.880, DINO-WM 0.992 다. LeWM 은 학습할수록 R² 가 줄었다 (epoch 10 0.988, 50 0.918, 100 0.880).
-- Stack Cube 는 #6 과 비교하지 못했다. 학습 중간 (epoch 44 와 88 사이) 부터 encoder embedding 이 episode 안에서 거의 변하지 않았다 (차원당 분산 0.003). 최종 model 의 예측 오차는 copy-last 와 같고, "쌓였는가" 는 probe 로 읽히지 않았다. Validation loss 는 끝까지 줄었다.
+- Stack Cube 는 #6 과 비교하지 못했다. Encoder embedding 이 episode 안에서 거의 변하지 않아 최종 model 의 예측 오차가 copy-last 와 같고, "쌓였는가" 가 probe 로 읽히지 않았다 (아래 temporal collapse).
 
 ![Cloth Move: frame 별 cloth pixel 수](assets/lewm_acwm_cloth_curves.png)
 
 Cloth Move test group 별 평균이다. 검정은 real frame, 파랑은 LeWM probe (점선 real frame embedding, 실선 rollout), 주황은 DINO-WM decoder (점선 Enc→Dec, 실선 rollout) 다.
+
+### Stack Cube: temporal collapse
+
+Stack Cube 의 LeWM encoder 는 학습 중간 (epoch 44 와 88 사이) 부터 episode 안의 변화를 embedding 에 남기지 않는다. 한 episode 의 모든 frame 이 거의 같은 embedding 이 된다 (z(e, t) ≈ c(e)). 아래 값은 최종 weight 로 test episode 에서 잰 것이다.
+
+| | Cloth Move | Push Sand | Pour Water | Stack Cube |
+|---|---:|---:|---:|---:|
+| Embedding variance per dim | 0.98 | 0.88 | 1.00 | 1.01 |
+| Within-episode variance / total | 0.59 | 0.43 | 0.69 | 0.003 |
+| ‖z_last − z_first‖ | 19.0 | 16.5 | 15.7 | 1.8 |
+
+- 전체 분산이 1 이라서 SIGReg 는 만족된다. 서로 다른 두 episode 의 embedding 거리는 평균 19.6 으로, 독립인 N(0, I) 두 점의 거리 (√(2·192) ≈ 19.6) 와 같다.
+- 옮겨지는 cube 는 256 px frame 에서 124 px 움직이지만 embedding 은 1.8 움직인다. Cube 위치는 episode 평균 embedding 에서 R² 0.17 이하로 읽힌다.
+- Embedding 은 episode 마다 조금씩 다른 camera 위치와 방 배경으로 정해진다. 방 모서리 색은 linear probe 로 R² 0.88 로 읽힌다. 방 배경의 pixel 당 평균 절대 차는 embedding 이 가장 가까운 episode 와 0.23 grey level, 무작위 episode 와 30.5 다 (중앙값).
+- 이 상태는 prediction loss 와 SIGReg 를 함께 작게 만든다. Validation loss 는 끝까지 줄어서 loss 로는 알 수 없다. [Sobal et al. 2022](https://arxiv.org/abs/2211.10831) 에서도 VICReg, SimCLR 로 학습한 JEPA 가 고정된 배경을 표현하고 움직이는 점은 표현하지 않았다.
+- Test split 에는 첫 frame 이 같은 episode 쌍이 88개 있다 (InD 17, OoD 71).
 
 ## Setup
 
@@ -39,6 +55,19 @@ Cloth Move test group 별 평균이다. 검정은 real frame, 파랑은 LeWM pro
 | Probe | Ridge regression, embedding → 물체 양. Group 마다 test episode 를 짝수, 홀수로 나눠 한쪽의 real frame embedding 으로 맞추고 다른 쪽에 적용한 뒤 서로 바꾼다 |
 
 ACWM-Phys 는 simulator 를 공개하지 않아서 planning 은 평가하지 않았다.
+
+## Files
+
+| Path | Content |
+|---|---|
+| `acwm/results/eval_<env>.json` | LeWM 평가 결과. Embedding 예측 오차와 probe 값 (최종 weight) |
+| `acwm/results/dinowm_cloth_probe.json` | 같은 probe 를 DINO-WM latent 에 쓴 결과 (Cloth Move) |
+| `acwm/results/size_class_probe.json` | Cloth Move 크기 group 을 맞히는 3-class probe (LeWM, DINO-WM) |
+| `acwm/results/tables.md` | Environment 별 전체 표 (25-step 값 포함). `make_tables.py` 로 만든다 |
+| `acwm/results/temporal_collapse/` | Stack Cube 분석 script 와 출력 (`output.txt`) |
+| `assets/lewm_acwm_cloth_curves.png` | Cloth Move 그림. `acwm/results/plot_curves.py` 로 만든다 |
+
+Script 들이 읽는 frame 별 embedding 파일 (`eval_<env>.npz`, `dinowm_cloth_latents.npz`, 합계 약 110 MB) 은 git 에 넣지 않았다.
 
 ## Reproduce
 
